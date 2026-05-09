@@ -53,3 +53,8 @@ class PingInjector(CustomLogger):
         finally:
             tick_t.cancel()
             pump_t.cancel()
+            for t in (tick_t, pump_t):
+                try:
+                    await t
+                except BaseException:
+                    pass
