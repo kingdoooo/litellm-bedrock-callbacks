@@ -96,7 +96,7 @@
     # ...existing keys (image / container_name / restart / depends_on / env_file / network_mode / command)...
     environment:                              # NEW section
       - PYTHONPATH=/app
-      - PING_INTERVAL_SECONDS=30
+      - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS:-30}
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./callbacks:/app/callbacks:ro         # NEW line
