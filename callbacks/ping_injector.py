@@ -3,12 +3,22 @@ LiteLLM CustomLogger that injects Anthropic-style SSE ping frames
 during idle periods of streaming responses.
 
 Design doc: docs/superpowers/specs/2026-05-09-ping-injector-design.md
+
+The callback must be referenced in config.yaml as
+`callbacks.ping_injector.instance` — LiteLLM's `get_instance_fn` resolves
+the dotted path via `getattr`, so the target must be a pre-built instance,
+not the class.
+
+We yield a pre-formatted SSE string (not a dict) so the SSE serializer
+preserves the `event: ping` line — serializing a dict would drop it.
 """
 import asyncio
 import os
 import time
 
 from litellm.integrations.custom_logger import CustomLogger
+
+_PING_FRAME = 'event: ping\ndata: {"type":"ping"}\n\n'
 
 
 class PingInjector(CustomLogger):
@@ -33,7 +43,7 @@ class PingInjector(CustomLogger):
         async def tick():
             while True:
                 await asyncio.sleep(self.interval)
-                await q.put(("ping", {"type": "ping"}))
+                await q.put(("ping", _PING_FRAME))
 
         pump_t = asyncio.create_task(pump())
         tick_t = asyncio.create_task(tick())
@@ -58,3 +68,6 @@ class PingInjector(CustomLogger):
                     await t
                 except BaseException:
                     pass
+
+
+instance = PingInjector()
