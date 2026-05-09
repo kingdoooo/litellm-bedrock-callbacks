@@ -1,0 +1,18 @@
+# LiteLLM 原生部署文件（由上游 / 现有部署维护，不纳入本 repo）
+.env
+config.yaml
+docker-compose.yml
+ai_usage_chat.py
+endpoints.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
