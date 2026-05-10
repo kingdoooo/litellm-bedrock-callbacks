@@ -35,14 +35,14 @@
 **Files:**
 - Create: `callbacks/__init__.py`
 
-- [ ] **Step 1: 创建目录和空 `__init__.py`**
+- [x] **Step 1: 创建目录和空 `__init__.py`**
 
 ```bash
 mkdir -p /home/ec2-user/litellm/callbacks
 : > /home/ec2-user/litellm/callbacks/__init__.py
 ```
 
-- [ ] **Step 2: 验证目录结构**
+- [x] **Step 2: 验证目录结构**
 
 ```bash
 ls -la /home/ec2-user/litellm/callbacks
@@ -55,7 +55,7 @@ drwxr-xr-x ... ..
 -rw-r--r-- ... __init__.py
 ```
 
-- [ ] **Step 3: 确认 `__init__.py` 被 git 追踪（确认 `.gitignore` 没屏蔽）**
+- [x] **Step 3: 确认 `__init__.py` 被 git 追踪（确认 `.gitignore` 没屏蔽）**
 
 ```bash
 cd /home/ec2-user/litellm && git status --short
@@ -69,7 +69,7 @@ Expected: `?? callbacks/__init__.py`（以及 `?? docs/superpowers/plans/2026-05
 **Files:**
 - Create: `callbacks/ping_injector.py`
 
-- [ ] **Step 1: 写入完整实现**
+- [x] **Step 1: 写入完整实现**
 
 Create `/home/ec2-user/litellm/callbacks/ping_injector.py`:
 
@@ -131,14 +131,14 @@ class PingInjector(CustomLogger):
             pump_t.cancel()
 ```
 
-- [ ] **Step 2: 语法检查**
+- [x] **Step 2: 语法检查**
 
 ```bash
 python3 -m py_compile /home/ec2-user/litellm/callbacks/ping_injector.py && echo OK
 ```
 Expected: `OK`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/ec2-user/litellm
@@ -156,7 +156,7 @@ EOF
 )"
 ```
 
-- [ ] **Step 4: 确认 commit 成功**
+- [x] **Step 4: 确认 commit 成功**
 
 ```bash
 git log --oneline -3
@@ -190,7 +190,7 @@ Expected: 最新一条是 `feat: add PingInjector CustomLogger ...`
     command: --config /app/config.yaml --port 4000
 ```
 
-- [ ] **Step 1: 在 `env_file:` 段之后插入 `environment:` 段**
+- [x] **Step 1: 在 `env_file:` 段之后插入 `environment:` 段**
 
 `PING_INTERVAL_SECONDS` 使用 `${VAR:-default}` 语法，方便后续验证阶段临时降低间隔（Task 6）。
 
@@ -213,7 +213,7 @@ Expected: 最新一条是 `feat: add PingInjector CustomLogger ...`
     network_mode: host
 ```
 
-- [ ] **Step 2: 在 `volumes:` 段的 `config.yaml` 行之后插入 callbacks mount**
+- [x] **Step 2: 在 `volumes:` 段的 `config.yaml` 行之后插入 callbacks mount**
 
 把：
 
@@ -232,14 +232,14 @@ Expected: 最新一条是 `feat: add PingInjector CustomLogger ...`
       - ./ai_usage_chat.py:/usr/lib/python3.13/site-packages/litellm/proxy/management_endpoints/usage_endpoints/ai_usage_chat.py
 ```
 
-- [ ] **Step 3: 验证 compose 文件语法**
+- [x] **Step 3: 验证 compose 文件语法**
 
 ```bash
 cd /home/ec2-user/litellm && docker compose config > /dev/null && echo OK
 ```
 Expected: `OK`（compose 解析成功，无 YAML 错误）
 
-- [ ] **Step 4: 预览最终渲染，确认新 key 都在**
+- [x] **Step 4: 预览最终渲染，确认新 key 都在**
 
 ```bash
 docker compose config | grep -E "PYTHONPATH|PING_INTERVAL|callbacks:/app"
@@ -269,7 +269,7 @@ litellm_settings:
   drop_params: true
 ```
 
-- [ ] **Step 1: 在 `litellm_settings` 末尾追加 `callbacks` 行**
+- [x] **Step 1: 在 `litellm_settings` 末尾追加 `callbacks` 行**
 
 改为：
 
@@ -283,7 +283,7 @@ litellm_settings:
   callbacks: callbacks.ping_injector.PingInjector
 ```
 
-- [ ] **Step 2: YAML 语法检查**
+- [x] **Step 2: YAML 语法检查**
 
 ```bash
 python3 -c "import yaml; yaml.safe_load(open('/home/ec2-user/litellm/config.yaml'))" && echo OK
@@ -296,21 +296,21 @@ Expected: `OK`
 
 **Files:** 无改动
 
-- [ ] **Step 1: 重建容器**
+- [x] **Step 1: 重建容器**
 
 ```bash
 cd /home/ec2-user/litellm && docker compose up -d --force-recreate litellm
 ```
 Expected 最后输出：`Container litellm  Started`
 
-- [ ] **Step 2: 检查容器状态**
+- [x] **Step 2: 检查容器状态**
 
 ```bash
 docker compose ps litellm
 ```
 Expected: `STATUS` 列显示 `Up ... (healthy)` 或 `Up ... seconds`（无 Restarting / Exit）
 
-- [ ] **Step 3: 检查启动日志，确认 callback 加载、无 import 错误**
+- [x] **Step 3: 检查启动日志，确认 callback 加载、无 import 错误**
 
 ```bash
 docker logs litellm 2>&1 | tail -80
@@ -322,14 +322,14 @@ Expected:
 
 若看到 `ModuleNotFoundError: No module named 'callbacks'`：检查 `PYTHONPATH=/app` 是否生效、`./callbacks:/app/callbacks:ro` 是否挂载正确。
 
-- [ ] **Step 4: 确认 callback 模块在容器内可 import**
+- [x] **Step 4: 确认 callback 模块在容器内可 import**
 
 ```bash
 docker exec litellm python -c "from callbacks.ping_injector import PingInjector; print(PingInjector())"
 ```
 Expected: `<callbacks.ping_injector.PingInjector object at 0x...>`
 
-- [ ] **Step 5: 确认实例读取了环境变量**
+- [x] **Step 5: 确认实例读取了环境变量**
 
 ```bash
 docker exec litellm python -c "from callbacks.ping_injector import PingInjector; p = PingInjector(); print('interval =', p.interval)"
@@ -347,7 +347,7 @@ Expected: `interval = 30.0`
 **Files:**
 - Modify: `.env`（临时，gitignored — 验证后 revert）
 
-- [ ] **Step 1: 在 `.env` 里临时设置 `PING_INTERVAL_SECONDS=2`**
+- [x] **Step 1: 在 `.env` 里临时设置 `PING_INTERVAL_SECONDS=2`**
 
 ```bash
 echo "PING_INTERVAL_SECONDS=2" >> /home/ec2-user/litellm/.env
@@ -355,7 +355,7 @@ cat /home/ec2-user/litellm/.env
 ```
 Expected 末尾一行：`PING_INTERVAL_SECONDS=2`
 
-- [ ] **Step 2: 重建容器让环境变量生效**
+- [x] **Step 2: 重建容器让环境变量生效**
 
 ```bash
 cd /home/ec2-user/litellm && docker compose up -d --force-recreate litellm
@@ -363,7 +363,7 @@ docker exec litellm python -c "import os; print('env =', os.environ.get('PING_IN
 ```
 Expected: `env = 2`
 
-- [ ] **Step 3: 发起 curl 流式请求，抓帧**
+- [x] **Step 3: 发起 curl 流式请求，抓帧**
 
 ```bash
 source /home/ec2-user/litellm/.env && \
@@ -381,7 +381,7 @@ wc -l /tmp/ping_capture.txt
 ```
 Expected: 行数在几十到几百之间（模型实际输出了内容）。
 
-- [ ] **Step 4: 验证 ping 帧出现且格式合规**
+- [x] **Step 4: 验证 ping 帧出现且格式合规**
 
 ```bash
 grep -c -E '^(event: ping|data: \{"type":"ping"\})' /tmp/ping_capture.txt
@@ -404,7 +404,7 @@ Expected 看到以下两种之一：
   ```
   如果只有 `data:` 没有 `event: ping`，记录下来，在 Task 10 验证 CC 是否识别。如果 CC 不识别，按 spec §8 回滚，启动 PRD Phase 2（方案 B）。
 
-- [ ] **Step 5: 保存帧样本，便于 Task 7 对比**
+- [x] **Step 5: 保存帧样本，便于 Task 7 对比**
 
 ```bash
 cp /tmp/ping_capture.txt /tmp/ping_sample_idle.txt
@@ -419,7 +419,7 @@ echo "saved: /tmp/ping_sample_idle.txt"
 
 **前置：** Task 6 已经把 `PING_INTERVAL_SECONDS=2` 设好并生效。
 
-- [ ] **Step 1: 发起一个快速响应的 curl（短 prompt + 限制 max_tokens）**
+- [x] **Step 1: 发起一个快速响应的 curl（短 prompt + 限制 max_tokens）**
 
 ```bash
 source /home/ec2-user/litellm/.env && \
@@ -435,7 +435,7 @@ curl -sN -X POST http://localhost:4000/v1/messages \
   }' > /tmp/ping_capture_short.txt 2>&1
 ```
 
-- [ ] **Step 2: 验证无 ping 帧（或极少）**
+- [x] **Step 2: 验证无 ping 帧（或极少）**
 
 ```bash
 grep -c 'data: {"type":"ping"}' /tmp/ping_capture_short.txt
@@ -443,7 +443,7 @@ grep -c 'data: {"type":"ping"}' /tmp/ping_capture_short.txt
 Expected: `0`（短请求应在 2 秒内完成，不应触发 ping）
 - 若结果 `≥ 1`，说明实现的空闲语义错了（可能改成了定时发送），需要回到 Task 2 复核代码。
 
-- [ ] **Step 3: 对比 Task 6 样本**
+- [x] **Step 3: 对比 Task 6 样本**
 
 ```bash
 echo "idle-triggered pings:"
@@ -467,7 +467,7 @@ short-request pings (expected 0):
 
 **前置：** `PING_INTERVAL_SECONDS=2` 仍在生效。
 
-- [ ] **Step 1: 提取 Task 6 样本中的事件名序列**
+- [x] **Step 1: 提取 Task 6 样本中的事件名序列**
 
 ```bash
 grep -E '^event:' /tmp/ping_sample_idle.txt | sort -u
@@ -483,7 +483,7 @@ event: message_stop
 ```
 如果还出现 `event: ping` 就更好（说明完美格式）。
 
-- [ ] **Step 2: 确认 message_start / message_stop 各出现恰好 1 次**
+- [x] **Step 2: 确认 message_start / message_stop 各出现恰好 1 次**
 
 ```bash
 echo "message_start count:"
@@ -493,7 +493,7 @@ grep -c '^event: message_stop' /tmp/ping_sample_idle.txt
 ```
 Expected: 两条都是 `1`。
 
-- [ ] **Step 3: 确认 message_start 是第一个 event、message_stop 是最后一个 event**
+- [x] **Step 3: 确认 message_start 是第一个 event、message_stop 是最后一个 event**
 
 ```bash
 grep -n '^event:' /tmp/ping_sample_idle.txt | sed -n '1p;$p'
@@ -510,7 +510,7 @@ Expected:
 
 **前置：** `PING_INTERVAL_SECONDS=2` 仍在生效。
 
-- [ ] **Step 1: 发一个故意错的请求（不存在的模型）**
+- [x] **Step 1: 发一个故意错的请求（不存在的模型）**
 
 ```bash
 source /home/ec2-user/litellm/.env && \
@@ -528,7 +528,7 @@ cat /tmp/ping_err.txt
 ```
 Expected: 一段 JSON 错误响应（LiteLLM 返回 400/404 或类似），**不包含** `data: {"type":"ping"}`。
 
-- [ ] **Step 2: 验证错误响应里没有 ping**
+- [x] **Step 2: 验证错误响应里没有 ping**
 
 ```bash
 grep -c 'data: {"type":"ping"}' /tmp/ping_err.txt
@@ -544,7 +544,7 @@ Expected: `0`
 **Files:**
 - Modify: `.env`（revert PING_INTERVAL_SECONDS）
 
-- [ ] **Step 1: 把 `.env` 里 `PING_INTERVAL_SECONDS=2` 删掉**
+- [x] **Step 1: 把 `.env` 里 `PING_INTERVAL_SECONDS=2` 删掉**
 
 ```bash
 cd /home/ec2-user/litellm
@@ -553,7 +553,7 @@ cat .env
 ```
 Expected：没有 `PING_INTERVAL_SECONDS=` 行了。
 
-- [ ] **Step 2: 重建容器，确认间隔回到默认 30**
+- [x] **Step 2: 重建容器，确认间隔回到默认 30**
 
 ```bash
 docker compose up -d --force-recreate litellm
@@ -562,13 +562,13 @@ docker exec litellm python -c "import os; print('env =', os.environ.get('PING_IN
 ```
 Expected: `env = 30`（compose 文件里 `${PING_INTERVAL_SECONDS:-30}` 的 fallback 生效）
 
-- [ ] **Step 3: （手动）在一个新 Claude Code 会话里跑长文件写入场景**
+- [x] **Step 3: （手动）在一个新 Claude Code 会话里跑长文件写入场景**
 
 触发 PRD §1.1 中描述的场景：让 CC 一次性写一个较长的文件（5~10 分钟单次输出）。例如：
 
 > 帮我写一个 ~3000 行的 Python 脚本，实现一个简易的 KV 存储引擎，包含 B+ 树、WAL、快照、压缩、测试。一次性写入一个文件 `/tmp/kv_engine.py`，不要分批。
 
-- [ ] **Step 4: 观察 CC 行为**
+- [x] **Step 4: 观察 CC 行为**
 
 期望观察到（Pass criteria）：
 - CC **不 hang**，能完成写入
@@ -576,7 +576,7 @@ Expected: `env = 30`（compose 文件里 `${PING_INTERVAL_SECONDS:-30}` 的 fall
 - 从 LiteLLM access log（`docker logs litellm 2>&1 | grep /v1/messages`）看是一次 stream 请求，没有后续的 non-stream fallback
 - 期间可能能看到容器内 Traceback（仅当 callback 报错才会有 —— 正常不应有）
 
-- [ ] **Step 5: 如果 Task 6 Step 4 里观察到的是"降级格式"（只有 `data:` 没有 `event: ping`），且本步 CC 依然 hang**
+- [x] **Step 5: 如果 Task 6 Step 4 里观察到的是"降级格式"（只有 `data:` 没有 `event: ping`），且本步 CC 依然 hang**
 
 → 触发 PRD Phase 2 条件。按 spec §8 Rollback 处理：
 
@@ -588,7 +588,7 @@ docker compose restart litellm
 
 然后回到 brainstorm 阶段，开启 Phase 2（方案 B：前置 FastAPI 包装层）的新设计流程。**这条 Plan 到此结束。**
 
-- [ ] **Step 6: 如果 CC 正常完成，记录验收通过**
+- [x] **Step 6: 如果 CC 正常完成，记录验收通过**
 
 ```bash
 date -u +"%Y-%m-%dT%H:%M:%SZ" | tee /tmp/ping_injector_e2e_passed.txt
@@ -601,7 +601,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" | tee /tmp/ping_injector_e2e_passed.txt
 **Files:**
 - Modify: `docs/superpowers/specs/2026-05-09-ping-injector-design.md`
 
-- [ ] **Step 1: 把 spec 的"状态"字段从"待实现"改为"已实现"**
+- [x] **Step 1: 把 spec 的"状态"字段从"待实现"改为"已实现"**
 
 Edit `/home/ec2-user/litellm/docs/superpowers/specs/2026-05-09-ping-injector-design.md`:
 
@@ -614,7 +614,7 @@ Edit `/home/ec2-user/litellm/docs/superpowers/specs/2026-05-09-ping-injector-des
 - **状态**：已实现（2026-05-09）
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 cd /home/ec2-user/litellm
@@ -627,7 +627,7 @@ EOF
 )"
 ```
 
-- [ ] **Step 3: 查看最终 git 状态**
+- [x] **Step 3: 查看最终 git 状态**
 
 ```bash
 git log --oneline
