@@ -6,25 +6,29 @@
 
 ## 问题背景 / Problem background
 
+> 这是一个 **Claude Code 客户端 ↔ Bedrock 原生 SSE** 之间的兼容性问题，与 LiteLLM 本身无关。本 repo 只是因为我们的部署**恰好**使用 LiteLLM 作为网关，才顺势在它的扩展点上打补丁；换成任何在 CC 和 Bedrock 中间的其他代理层，方案是一样的。
+>
+> This is a compatibility issue between **Claude Code's client and Bedrock's native SSE stream** — it has nothing to do with LiteLLM itself. This repo patches the symptom at the LiteLLM layer simply because that's the gateway we happen to run; any proxy sitting between CC and Bedrock would do.
+
 **中文**
 
-Claude Code（CC）通过 LiteLLM 网关调用 Bedrock 上的 Anthropic 模型（Opus / Sonnet）时，长输出（长文件写入、长推理）会**卡住**：
+Claude Code（CC）调用 Bedrock 上的 Anthropic 模型（Opus / Sonnet）时，长输出（长文件写入、长推理）会**卡住**：
 
 - Bedrock Converse 的 SSE 流在推理阶段会出现**长时间无帧**的空闲窗口（几十秒级）
 - CC 的客户端在空闲 ≥ 某阈值后判定 stream 异常，**回退成 non-stream**，同时把 `max_tokens` 裁到 21333
 - 回退后的请求在长输出下直接超时 / 内容截断，用户体感就是"卡死"
 
-Anthropic 官方 API 的解决办法是**在空闲期下发 `event: ping` 心跳帧**——只要客户端在空窗期仍收到字节，就不会误判。Bedrock 原生流**没有这个心跳**，LiteLLM 网关也不会自动补。
+Anthropic 官方 API 的解决办法是**在空闲期下发 `event: ping` 心跳帧**——只要客户端在空窗期仍收到字节，就不会误判。Bedrock 原生流**没有这个心跳**，所以只要 CC 和 Bedrock 中间没有一层主动补 ping 的代理，就会出现上述 hang。
 
 **English**
 
-When Claude Code talks to Anthropic models on Bedrock through the LiteLLM gateway, long-output requests **hang**:
+When Claude Code calls Anthropic models on Bedrock (Opus / Sonnet), long-output requests **hang**:
 
 - Bedrock Converse's SSE stream has long idle windows (tens of seconds) during reasoning
 - After enough idle time, Claude Code assumes the stream is broken, **falls back to non-streaming**, and clips `max_tokens` to 21333
 - For long outputs the fallback request times out or truncates — the user just sees a hang
 
-Anthropic's own API avoids this by emitting `event: ping` heartbeat frames during idle periods — as long as the client keeps seeing bytes, it won't bail. Bedrock's native stream has no such heartbeat, and neither does LiteLLM by default.
+Anthropic's own API avoids this by emitting `event: ping` heartbeat frames during idle periods — as long as the client keeps seeing bytes, it won't bail. Bedrock's native stream has no such heartbeat, so unless something in front of Bedrock synthesizes pings, any CC → Bedrock path will eventually hang.
 
 ---
 
@@ -32,7 +36,7 @@ Anthropic's own API avoids this by emitting `event: ping` heartbeat frames durin
 
 **中文**
 
-在 LiteLLM 的 `CustomLogger` 扩展点 `async_post_call_streaming_iterator_hook` 上挂一个包装器 `PingInjector`，它位于 "LiteLLM 拿到上游 SSE chunks" 和 "SSE 序列化器把帧写回客户端" 之间——这是改 SSE 行为的最后一个干净的插入点。
+既然问题本质是"空闲期没字节"，任何中间代理层插一个周期性心跳帧都能解决。我们的部署里代理层是 LiteLLM，所以我们挑 LiteLLM 自带的 `CustomLogger` 扩展点 `async_post_call_streaming_iterator_hook` 挂一个包装器 `PingInjector`；它位于 "LiteLLM 拿到上游 SSE chunks" 和 "SSE 序列化器把帧写回客户端" 之间——这是改 SSE 行为的最后一个干净的插入点。
 
 实现上用一个 `asyncio.Queue` 把三件事解耦：
 
@@ -44,7 +48,7 @@ Anthropic's own API avoids this by emitting `event: ping` heartbeat frames durin
 
 **English**
 
-We hook LiteLLM's `async_post_call_streaming_iterator_hook` with a wrapper called `PingInjector`. It sits between "LiteLLM receives upstream SSE chunks" and "LiteLLM's SSE serializer writes to the client" — the last clean place to shape the SSE stream.
+The underlying fix is simply "inject a heartbeat frame during idle windows" — any intermediary proxy could do it. In our deployment the proxy happens to be LiteLLM, so we reuse its built-in `CustomLogger` extension point `async_post_call_streaming_iterator_hook` and hook a wrapper called `PingInjector` there. It sits between "LiteLLM receives upstream SSE chunks" and "LiteLLM's SSE serializer writes to the client" — the last clean place to shape the SSE stream.
 
 Three coroutines coordinate through one `asyncio.Queue`:
 
