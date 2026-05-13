@@ -20,13 +20,14 @@ AWS Bedrock  (global.anthropic.claude-opus-4-7 等)
 
 ---
 
-## 会遇到的三个问题
+## 会遇到的四个问题
 
 | 问题 | 表现 | 致命性 | 解决位置 |
 |---|---|---|---|
-| **1. Codex 请求带 Bedrock 不认的字段** | 每次对话返回 `BedrockException - client_metadata: Extra inputs are not permitted` | 对话直接 400 | LiteLLM 端 `CodexSanitizer` 回调 |
-| **2. Codex 不识别自定义 slug** | 启动 warning `Model metadata for 'claude-opus-4-7' not found. Defaulting to fallback metadata` | 非致命但 context window 被压到 fallback 值 | Codex 端 `~/.codex/model_catalog.json` |
-| **3. Bedrock 流长空闲导致客户端误判** | 长输出时 Codex idle timeout 断流 / Claude Code 回退非流式 | 表现为卡死 | LiteLLM 端 `PingInjector` 回调 |
+| **1. Codex 请求带 Bedrock 不认的字段** | `BedrockException - client_metadata: Extra inputs are not permitted` | 对话直接 400 | LiteLLM 端 `CodexSanitizer` (`async_pre_call_hook`) |
+| **2. LiteLLM 合成的 `output_config` 泄漏到 Bedrock** | `BedrockException - output_config.format: Extra inputs are not permitted`（仅当 Responses 路径 + Claude 4.6/4.7 + 有 reasoning effort） | 对话直接 400 | LiteLLM 端 `CodexSanitizer` (`async_pre_call_deployment_hook`) |
+| **3. Codex 不识别自定义 slug** | `Model metadata for 'claude-opus-4-7' not found. Defaulting to fallback metadata` | 非致命但 context window 被压到 fallback 值 | Codex 端 `~/.codex/model_catalog.json` |
+| **4. Bedrock 流长空闲导致客户端误判** | Codex idle timeout 断流 / Claude Code 回退非流式 | 表现为卡死 | LiteLLM 端 `PingInjector` 回调 |
 
 ### 问题 1 详情
 
@@ -42,9 +43,15 @@ Codex Rust 源码 `codex-rs/core/src/client.rs:761` 硬编码在 Responses API �
 
 ### 问题 2 详情
 
-Codex 内部维护模型 metadata 表（context window、reasoning 能力、truncation 策略等）。匹配规则是 `slug` 的 **longest-prefix match**。自定义 slug 命中不到时 `used_fallback_model_metadata = true`，触发 `codex-rs/core/src/session/turn_context.rs:770` 的 warning，并用 fallback 参数（context window 通常会被压到很小）。解法是让 Codex 读一份本地 `model_catalog.json`。
+LiteLLM 的 Anthropic Chat 转换层（`llms/anthropic/chat/transformation.py:1108`）看到 Claude 4.6/4.7 + `reasoning.effort` 会合成一个 `output_config: {"effort": "high"}` 字段，这是 Anthropic 原生 Messages API 的参数。走 Bedrock Converse 时本应被 pop，但 Responses API → completion → Bedrock adapter 这条路径上 pop 逻辑不覆盖，`output_config` 直接透传到 Bedrock Converse wire 被拒。
+
+**触发条件**：Codex 走 `/v1/responses` + 模型是 Claude 4.6/4.7 + 请求带 reasoning effort（Codex 默认就发）。Claude Code 走 `/v1/messages` 不受影响（`output_config` 在原生 Anthropic 路径是正常字段）。
 
 ### 问题 3 详情
+
+Codex 内部维护模型 metadata 表（context window、reasoning 能力、truncation 策略等）。匹配规则是 `slug` 的 **longest-prefix match**。自定义 slug 命中不到时 `used_fallback_model_metadata = true`，触发 `codex-rs/core/src/session/turn_context.rs:770` 的 warning，并用 fallback 参数（context window 通常会被压到很小）。解法是让 Codex 读一份本地 `model_catalog.json`。
+
+### 问题 4 详情
 
 Bedrock Converse SSE 在推理阶段会出现 20-60s 级别的无帧空闲。两类客户端都对空闲敏感：
 
@@ -108,7 +115,7 @@ model_list:
 litellm_settings:
   callbacks:
     - callbacks.codex_sanitizer.instance    # 先消毒，解决问题 1
-    - callbacks.ping_injector.instance      # 再补心跳，解决问题 3
+    - callbacks.ping_injector.instance      # 再补心跳，解决问题 4
     # - callbacks.chunk_delayer.instance    # 仅在测试 PingInjector 时启用
 ```
 

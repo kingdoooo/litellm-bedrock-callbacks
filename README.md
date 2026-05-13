@@ -53,35 +53,43 @@ Anthropic 官方 API 的解决办法是在空闲期下发 `event: ping` 心跳�
 
 ---
 
-### 2. Codex 硬编码字段剥除（`codex_sanitizer`）
+### 2. Responses API → Bedrock 字段消毒（`codex_sanitizer`）
 
-**问题 / Problem**
+该回调在两个 hook 点拦截三类字段，**统一只对 `call_type == "aresponses"` 生效**，Claude Code（`anthropic_messages`）和 Chat Completions（`acompletion`）路径零影响。
 
-Codex Rust 源码 `codex-rs/core/src/client.rs:761` 硬编码在 Responses API 请求体顶层注入：
+#### 2a. Codex 硬编码的 `client_metadata` / `include`
+
+Codex Rust 源码 `codex-rs/core/src/client.rs:761` 在 Responses API 请求体顶层硬编码注入：
 
 ```json
 "client_metadata": {"x-codex-installation-id": "<uuid>"}
 ```
 
-这不是 OpenAI Responses API 的规范字段（`openai/openai-openapi` 仓库 0 命中），真 OpenAI 静默忽略，但 Bedrock Converse 严格校验直接拒绝：
+这不是 OpenAI Responses API 规范字段（`openai/openai-openapi` 0 命中），真 OpenAI 静默忽略，Bedrock Converse 严格校验直接拒：
 
 ```
-BedrockException - {"message":"The model returned the following errors:
-client_metadata: Extra inputs are not permitted"}
+BedrockException - client_metadata: Extra inputs are not permitted
 ```
 
-Codex 还可能带 `include: ["reasoning.encrypted_content"]`，Bedrock 同样不认。上游 issue [`openai/codex#17910`](https://github.com/openai/codex/issues/17910) 已 WONTFIX。
+同类的还有 `include: ["reasoning.encrypted_content"]`。上游 issue [`openai/codex#17910`](https://github.com/openai/codex/issues/17910) 已 WONTFIX。
+
+→ `async_pre_call_hook` 里 `data.pop("client_metadata", None)` 和过滤 `data["include"]`。
+
+#### 2b. LiteLLM 合成的 `output_config` 泄漏
+
+LiteLLM 的 Anthropic Chat 转换层（`llms/anthropic/chat/transformation.py:1108`）看到 Claude 4.6/4.7 + `reasoning.effort`，会合成 `output_config: {"effort": "..."}` 给 Anthropic 原生 Messages API 用。走 Bedrock Converse 时本应被 pop，但 Responses API → completion → Bedrock adapter 这条路径的 pop 逻辑不覆盖，`output_config` 泄漏到 wire 被拒：
+
+```
+BedrockException - output_config.format: Extra inputs are not permitted
+```
+
+Claude Code 走原生 Anthropic 路径，`output_config` 是正常字段，必须保留（否则 xhigh 等 effort 配置失效）。因此要用 `call_type` 精准只剥 Responses API 路径的这个合成字段。
+
+→ `async_pre_call_deployment_hook` 里 `kwargs.pop("output_config", None)` + `optional_params.pop("output_config", None)`。
+
+**为什么两个 hook 点：** `client_metadata` 是客户端发的原始字段，`pre_call_hook` 就能剥；`output_config` 是 LiteLLM 自己在 transformation 阶段合成的，`pre_call_hook` 时还不存在，必须用部署前最后一个 hook `pre_call_deployment_hook` 才能截到。
 
 **LiteLLM 原生 `drop_params` / `additional_drop_params` 救不了** —— 这俩只对 `/v1/chat/completions` 生效，`/v1/responses` 路径不跑（社区 issue #20515 / #25931 / #19225）。
-
-**作用 / How it works**
-
-`CustomLogger.async_pre_call_hook` 是 LiteLLM 官方文档化的扩展点，参数里有 `call_type: CallTypesLiteral`。`CodexSanitizer` 只在 `call_type == "aresponses"` 时动作：
-
-- `data.pop("client_metadata", None)`
-- 过滤 `data["include"]` 里的 `"reasoning.encrypted_content"`
-
-对 Claude Code（`call_type == "anthropic_messages"`）和 Chat Completions（`call_type == "acompletion"`）零影响。
 
 ---
 
