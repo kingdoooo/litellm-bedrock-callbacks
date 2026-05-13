@@ -17,6 +17,8 @@ import os
 
 from litellm.integrations.custom_logger import CustomLogger
 
+from callbacks._route import is_responses_api
+
 
 class ChunkDelayer(CustomLogger):
     def __init__(self):
@@ -26,6 +28,14 @@ class ChunkDelayer(CustomLogger):
     async def async_post_call_streaming_iterator_hook(
         self, user_api_key_dict, response, request_data
     ):
+        # Codex CLI / Responses API must never be delayed — this helper
+        # exists only to synthesize slow TTFB for PingInjector tests on
+        # the Anthropic Messages path.
+        if is_responses_api(request_data):
+            async for chunk in response:
+                yield chunk
+            return
+
         if self.delay <= 0:
             async for chunk in response:
                 yield chunk

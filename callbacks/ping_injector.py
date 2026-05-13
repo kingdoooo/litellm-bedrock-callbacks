@@ -18,7 +18,15 @@ import time
 
 from litellm.integrations.custom_logger import CustomLogger
 
+from callbacks._route import is_responses_api
+
+# Anthropic Messages API / Chat Completions — heartbeat as named event
 _PING_FRAME = 'event: ping\ndata: {"type":"ping"}\n\n'
+# OpenAI Responses API (Codex CLI) — SSE comment per WHATWG spec.
+# eventsource_stream consumes comments before dispatch, so Codex's
+# event-type match arms never see it. Bytes still flow on the wire,
+# which resets Codex's idle-timeout watchdog.
+_COMMENT_FRAME = ':\n\n'
 
 
 class PingInjector(CustomLogger):
@@ -29,6 +37,8 @@ class PingInjector(CustomLogger):
     async def async_post_call_streaming_iterator_hook(
         self, user_api_key_dict, response, request_data
     ):
+        frame = _COMMENT_FRAME if is_responses_api(request_data) else _PING_FRAME
+
         q: asyncio.Queue = asyncio.Queue()
 
         async def pump():
@@ -43,7 +53,7 @@ class PingInjector(CustomLogger):
         async def tick():
             while True:
                 await asyncio.sleep(self.interval)
-                await q.put(("ping", _PING_FRAME))
+                await q.put(("ping", frame))
 
         pump_t = asyncio.create_task(pump())
         tick_t = asyncio.create_task(tick())
