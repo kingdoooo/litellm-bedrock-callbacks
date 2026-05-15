@@ -55,7 +55,7 @@ Anthropic 官方 API 的解决办法是在空闲期下发 `event: ping` 心跳�
 
 ### 2. Responses API → Bedrock 字段消毒（`codex_sanitizer`）
 
-该回调在两个 hook 点拦截三类字段，**统一只对 `call_type == "aresponses"` 生效**，Claude Code（`anthropic_messages`）和 Chat Completions（`acompletion`）路径零影响。
+该回调在两个 hook 点拦截四类字段，**统一只对 `call_type == "aresponses"` 生效**，Claude Code（`anthropic_messages`）和 Chat Completions（`acompletion`）路径零影响。
 
 #### 2a. Codex 硬编码的 `client_metadata` / `include`
 
@@ -87,7 +87,24 @@ Claude Code 走原生 Anthropic 路径，`output_config` 是正常字段，必�
 
 → `async_pre_call_deployment_hook` 里 `kwargs.pop("output_config", None)` + `optional_params.pop("output_config", None)`。
 
-**为什么两个 hook 点：** `client_metadata` 是客户端发的原始字段，`pre_call_hook` 就能剥；`output_config` 是 LiteLLM 自己在 transformation 阶段合成的，`pre_call_hook` 时还不存在，必须用部署前最后一个 hook `pre_call_deployment_hook` 才能截到。
+#### 2c. Bedrock structured outputs schema 关键字消毒
+
+Codex 的 [`codex-plugin-cc`](https://github.com/openai/codex-plugin-cc)（`/codex:review`、`/codex:adversarial-review` 等 skill）通过 Codex app-server 的 `turn/start.outputSchema` 启用 OpenAI Responses API 的 native structured outputs，把一份 JSON Schema 放进请求的 `text.format.schema`。LiteLLM 转给 Bedrock 时会进入 `outputConfig.textFormat.structure.jsonSchema` 路径。
+
+Bedrock 的 structured outputs 只接受 JSON Schema Draft 2020-12 的一个**子集**：保留结构性关键字（`type` / `properties` / `required` / `enum` / `items` / `$ref` / `$defs` / `anyOf` 等），拒绝所有"纯校验"关键字。`codex-plugin-cc` 的 review schema 含 `{"type":"integer","minimum":1}`（line numbers）、`{"type":"number","minimum":0,"maximum":1}`（confidence）、多处 `{"type":"string","minLength":1}`，命中即 400：
+
+```
+BedrockException - output_config.format.schema:
+For 'integer' type, property 'minimum' is not supported
+```
+
+→ `async_pre_call_hook` 里递归遍历 `data["text"]["format"]["schema"]` 以及工具的 `parameters` / `input_schema`，剥掉 `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf` / `minLength` / `maxLength` / `pattern` / `format` / `minItems` / `maxItems` / `uniqueItems` / `minContains` / `maxContains` / `minProperties` / `maxProperties` / `unevaluatedProperties` / `default` / `examples` / `title` / `readOnly` / `writeOnly` / `$comment` 等关键字。**结构性关键字一律保留**，Bedrock 仍在协议层强约束输出 shape。
+
+**关键细节**：剥离时区分"schema-keyword 位置"和"name-bag 位置"——`properties` / `patternProperties` / `$defs` / `definitions` 这些 map 里的 key 是用户自定义名（review schema 真的有一个属性叫 `title`），只递归到 value，不动 key。否则会把合法的属性字段当关键字误删。
+
+**为什么不直接禁用 native structured outputs**：fallback 到 tool-call 模拟（LiteLLM `_create_json_tool_call_for_response_format`）会把"协议层强约束"降级为"提示层弱建议"，Codex 偶尔会拿到带前后缀的非纯 JSON，触发 `Codex did not return valid structured JSON`。剥关键字保留 native 路径才是不丢语义的选项。
+
+**为什么两个 hook 点：** `client_metadata` / structured-outputs schema 是客户端发的原始字段，`pre_call_hook` 就能剥；`output_config` 是 LiteLLM 自己在 transformation 阶段合成的，`pre_call_hook` 时还不存在，必须用部署前最后一个 hook `pre_call_deployment_hook` 才能截到。
 
 **LiteLLM 原生 `drop_params` / `additional_drop_params` 救不了** —— 这俩只对 `/v1/chat/completions` 生效，`/v1/responses` 路径不跑（社区 issue #20515 / #25931 / #19225）。
 
@@ -278,6 +295,8 @@ export LITELLM_API_KEY="<LiteLLM master key 或 virtual key>"
 │   │   if call_type == "aresponses":                              │    │
 │   │       data.pop("client_metadata", None)                      │    │
 │   │       filter data["include"]                                 │    │
+│   │       strip Bedrock-unsupported schema keywords from         │    │
+│   │         data["text"]["format"]["schema"] and tool schemas    │    │
 │   │   (Anthropic / Chat paths untouched)                         │    │
 │   └──────────────────────────────────────────────────────────────┘    │
 │        │                                                              │

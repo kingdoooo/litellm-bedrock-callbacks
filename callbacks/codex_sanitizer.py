@@ -3,7 +3,7 @@ LiteLLM CustomLogger that strips Bedrock-incompatible fields from
 OpenAI Responses API traffic (the Codex CLI path) without affecting
 the Anthropic Messages API path (Claude Code).
 
-Three fixes, two hooks, both guarded to Responses API only.
+Four concerns, two hooks, both guarded to Responses API only.
 
 1) async_pre_call_hook — runs on the raw request body:
 
@@ -14,6 +14,17 @@ Three fixes, two hooks, both guarded to Responses API only.
 
    - include: ["reasoning.encrypted_content"]: Codex also ships this;
      Bedrock likewise rejects.
+
+   - text.format.schema and strict-tool inputSchemas: Bedrock's
+     native structured outputs accept only a subset of JSON Schema
+     Draft 2020-12. Pure validation keywords (minimum, maxLength,
+     pattern, format, multipleOf, …) raise 400 "property X is not
+     supported for type Y". The codex-plugin-cc adversarial-review
+     skill ships a schema with `{"type":"integer","minimum":1}` for
+     line numbers and similar constraints on strings. We recursively
+     strip the unsupported keywords; structural keywords (type,
+     properties, required, enum, items, $ref, $defs, anyOf, …) are
+     preserved so Bedrock still enforces shape at the protocol level.
 
 2) async_pre_call_deployment_hook — runs after deployment selection,
    right before the wire serialization. Strips output_config that
@@ -41,6 +52,40 @@ def _is_responses_call(call_type) -> bool:
     return name == "aresponses"
 
 
+# Bedrock's structured-outputs JSON Schema subset rejects all "pure validation"
+# keywords. Keep structural keywords (type, properties, required, enum, const,
+# items, $ref, $defs, anyOf, allOf, oneOf, additionalProperties, description).
+_BEDROCK_UNSUPPORTED_SCHEMA_KEYS = frozenset({
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+    "minLength", "maxLength", "pattern", "format",
+    "minItems", "maxItems", "uniqueItems", "minContains", "maxContains",
+    "minProperties", "maxProperties", "unevaluatedProperties",
+    "default", "examples", "title", "readOnly", "writeOnly", "$comment",
+})
+
+# Inside these maps, keys are arbitrary user-defined names (property names,
+# pattern regexes, $defs ids), not JSON Schema keywords. Recurse into values
+# but never strip the keys themselves — otherwise a field literally named
+# "title" or "default" would be deleted from the schema.
+_SCHEMA_NAME_BAGS = frozenset({"properties", "patternProperties", "$defs", "definitions"})
+
+
+def _strip_unsupported_schema_keys(node) -> None:
+    if isinstance(node, dict):
+        for key in list(node.keys()):
+            value = node[key]
+            if key in _SCHEMA_NAME_BAGS and isinstance(value, dict):
+                for subv in value.values():
+                    _strip_unsupported_schema_keys(subv)
+            elif key in _BEDROCK_UNSUPPORTED_SCHEMA_KEYS:
+                del node[key]
+            else:
+                _strip_unsupported_schema_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            _strip_unsupported_schema_keys(item)
+
+
 class CodexSanitizer(CustomLogger):
     DROP_INCLUDE_VALUES = frozenset({"reasoning.encrypted_content"})
 
@@ -59,6 +104,31 @@ class CodexSanitizer(CustomLogger):
                 data["include"] = filtered
             else:
                 data.pop("include", None)
+
+        # Responses API structured output: data["text"]["format"]["schema"].
+        text = data.get("text")
+        if isinstance(text, dict):
+            fmt = text.get("format")
+            if isinstance(fmt, dict):
+                schema = fmt.get("schema")
+                if isinstance(schema, dict):
+                    _strip_unsupported_schema_keys(schema)
+
+        # Strict tools: parameters / input_schema / function.parameters.
+        tools = data.get("tools")
+        if isinstance(tools, list):
+            for tool in tools:
+                if not isinstance(tool, dict):
+                    continue
+                for key in ("parameters", "input_schema"):
+                    sub = tool.get(key)
+                    if isinstance(sub, dict):
+                        _strip_unsupported_schema_keys(sub)
+                fn = tool.get("function")
+                if isinstance(fn, dict):
+                    params = fn.get("parameters")
+                    if isinstance(params, dict):
+                        _strip_unsupported_schema_keys(params)
 
         return data
 
