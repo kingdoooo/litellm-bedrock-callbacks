@@ -151,7 +151,6 @@ services:
     environment:
       - PYTHONPATH=/app
       - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS:-30}
-      - CHUNK_DELAY_SECONDS=${CHUNK_DELAY_SECONDS:-0}
     volumes:
       - ./callbacks:/app/callbacks:ro
 ```
@@ -163,7 +162,6 @@ litellm_settings:
   callbacks:
     - callbacks.codex_sanitizer.instance    # 先消毒 / sanitize first
     - callbacks.ping_injector.instance      # 再心跳 / heartbeat second
-    # - callbacks.chunk_delayer.instance    # 仅测试 PingInjector 时启用
 ```
 
 - **两者都要**挂才能同时服务 Codex 和 Claude Code
@@ -176,7 +174,6 @@ litellm_settings:
 
 ```dotenv
 PING_INTERVAL_SECONDS=30
-# CHUNK_DELAY_SECONDS=300   # 仅测试时启用
 ```
 
 **④ 重启 / Restart**
@@ -216,8 +213,6 @@ curl -N -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
 ```
 
 长空闲期应能看到 `event: ping`。
-
-要强制触发 ping（造 hang 测试）：临时在 `.env` 设 `CHUNK_DELAY_SECONDS=300`、`config.yaml` 把 `chunk_delayer.instance` 加在 `ping_injector` **之前**，`docker compose restart litellm`。验证完记得改回。
 
 ---
 
@@ -275,7 +270,6 @@ export LITELLM_API_KEY="<LiteLLM master key 或 virtual key>"
 | Var | Default | 说明 / Meaning |
 |-----|---------|----------------|
 | `PING_INTERVAL_SECONDS` | `30` | 空闲多久后下发心跳；同时也是"帧密集时抑制心跳"的阈值 |
-| `CHUNK_DELAY_SECONDS` | `0` | 仅测试用。`>0` 时 `ChunkDelayer` 强制延迟首帧；Codex 路径 pass-through 不受影响 |
 
 ---
 
@@ -349,14 +343,11 @@ export LITELLM_API_KEY="<LiteLLM master key 或 virtual key>"
 |------|---------|
 | `callbacks/codex_sanitizer.py` | Codex → Bedrock 字段消毒 / field sanitizer |
 | `callbacks/ping_injector.py` | SSE 心跳 / SSE heartbeat |
-| `callbacks/chunk_delayer.py` | 测试工具 / test helper (no-op by default) |
 | `callbacks/_route.py` | 客户端判别 helper / client-type sniff helper |
 | `docs/codex-setup.md` | Codex 完整配置指南 / full Codex setup guide |
 | `docs/model_catalog.example.json` | Codex 模型 metadata 示例 / example model catalog |
 | `docs/superpowers/specs/` | Design docs |
 | `docs/superpowers/plans/` | Implementation plans |
-
-`ChunkDelayer` 是一个**仅测试用**的 CustomLogger：`CHUNK_DELAY_SECONDS > 0` 时它会把 Anthropic 路径上游第一帧压住指定秒数，用来人为造一个慢 TTFB 的空窗口，验证 `PingInjector` 真的在空闲期发心跳。Codex 路径始终 pass-through 不受延迟。日常是 no-op。
 
 ---
 

@@ -97,24 +97,10 @@ else:
 
 Rest of the pump/tick logic is unchanged.
 
-### `callbacks/chunk_delayer.py`
-
-Same classifier: only delay Anthropic Messages traffic. The current code
-explicitly skips Responses-API; the new behavior also skips Chat
-Completions (and anything else) so the test harness never perturbs
-unrelated client streams.
-
-```python
-from callbacks._route import classify_endpoint, ANTHROPIC_MESSAGES
-
-if classify_endpoint(request_data) != ANTHROPIC_MESSAGES:
-    async for chunk in response:
-        yield chunk
-    return
-```
-
 ## Out of scope
 
+- The legacy `chunk_delayer` test helper has been removed entirely in a
+  follow-up change; this spec no longer covers it.
 - No env switch to opt Chat Completions back into ping injection (YAGNI).
 - No changes to `codex_sanitizer.py` — its `call_type`-based dispatch is
   independent and correct.
@@ -122,8 +108,8 @@ if classify_endpoint(request_data) != ANTHROPIC_MESSAGES:
 
 ## Verification
 
-With `PING_INTERVAL_SECONDS=2` and `CHUNK_DELAY_SECONDS=5` set, run a
-streaming request against each endpoint and inspect the raw SSE bytes:
+With `PING_INTERVAL_SECONDS=2` set, run a streaming request against each
+endpoint and inspect the raw SSE bytes:
 
 1. `/v1/messages` (Anthropic Messages) — stream contains
    `event: ping\ndata: {"type":"ping"}` lines.

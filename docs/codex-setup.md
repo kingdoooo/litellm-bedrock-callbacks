@@ -76,7 +76,6 @@ services:
     environment:
       - PYTHONPATH=/app
       - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS:-30}
-      - CHUNK_DELAY_SECONDS=${CHUNK_DELAY_SECONDS:-0}
     volumes:
       - ./callbacks:/app/callbacks:ro
 ```
@@ -116,7 +115,6 @@ litellm_settings:
   callbacks:
     - callbacks.codex_sanitizer.instance    # 先消毒，解决问题 1
     - callbacks.ping_injector.instance      # 再补心跳，解决问题 4
-    # - callbacks.chunk_delayer.instance    # 仅在测试 PingInjector 时启用
 ```
 
 - `codex_sanitizer` 只实现 `async_pre_call_hook`，只在 `call_type == "aresponses"` 时动作，对 Claude Code 流量（`anthropic_messages`）零影响。
@@ -126,7 +124,6 @@ litellm_settings:
 
 ```dotenv
 PING_INTERVAL_SECONDS=30
-# CHUNK_DELAY_SECONDS=300   # 仅测试时启用
 ```
 
 ### ⑤ 重启

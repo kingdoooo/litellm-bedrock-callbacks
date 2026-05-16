@@ -361,3 +361,9 @@ docker compose ps
 ## 后续
 
 Plan 全部步骤完成后，使用 `superpowers:finishing-a-development-branch` 决定如何把 Task 1 的 commit 推到 origin。
+
+---
+
+## Postscript (2026-05-16)
+
+Task 2 (end-to-end SSE verification) was skipped — review and grep-based verification on the wire format was deemed sufficient. The `chunk_delayer.py` helper that Task 2 relied on has been removed entirely; future verification should restart the litellm container and grep the live SSE stream directly.
