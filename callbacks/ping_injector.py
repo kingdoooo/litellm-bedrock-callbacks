@@ -18,7 +18,11 @@ import time
 
 from litellm.integrations.custom_logger import CustomLogger
 
-from callbacks._route import is_responses_api
+from callbacks._route import (
+    ANTHROPIC_MESSAGES,
+    RESPONSES,
+    classify_endpoint,
+)
 
 # Anthropic Messages API / Chat Completions — heartbeat as named event
 _PING_FRAME = 'event: ping\ndata: {"type":"ping"}\n\n'
@@ -37,7 +41,19 @@ class PingInjector(CustomLogger):
     async def async_post_call_streaming_iterator_hook(
         self, user_api_key_dict, response, request_data
     ):
-        frame = _COMMENT_FRAME if is_responses_api(request_data) else _PING_FRAME
+        endpoint = classify_endpoint(request_data)
+        if endpoint == ANTHROPIC_MESSAGES:
+            frame = _PING_FRAME
+        elif endpoint == RESPONSES:
+            frame = _COMMENT_FRAME
+        else:
+            # OpenAI-compatible Chat Completions and any other route:
+            # do not inject. Their clients (e.g. line-based JSON.parse
+            # consumers) cannot tolerate `event: ping` lines, and SSE
+            # comments would not save them either. Pass through clean.
+            async for chunk in response:
+                yield chunk
+            return
 
         q: asyncio.Queue = asyncio.Queue()
 
