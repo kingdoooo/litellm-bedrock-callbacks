@@ -1,0 +1,34 @@
+Anchor-based patch for litellm/llms/anthropic/chat/transformation.py.
+
+Adds an _is_adaptive_thinking_model() carve-out around the forced
+tool_choice in the response_format synthetic-tool fallback path so that
+adaptive-thinking models (Claude 4.7+, thinking.type == "adaptive") do
+not collide with the Anthropic constraint
+"Thinking may not be enabled when tool_choice forces tool use".
+
+Mirrors BerriAI/litellm PR #28114. Drop this file once that PR is
+merged AND we upgrade the LiteLLM image past it.
+
+--- a/litellm/llms/anthropic/chat/transformation.py
++++ b/litellm/llms/anthropic/chat/transformation.py
+@@ -1067,7 +1067,19 @@
+                     )
+                     if _tool is None:
+                         continue
+-                    if not is_thinking_enabled:
++                    # Adaptive thinking models (Claude 4.7+) use
++                    # ``thinking.type == "adaptive"`` rather than
++                    # ``"enabled"``, so ``is_thinking_enabled`` (which only
++                    # matches ``"enabled"`` / ``reasoning_effort``) reports
++                    # False. Without this extra check we set a forced
++                    # ``tool_choice`` while ``thinking: adaptive`` is still on
++                    # the wire body, and Anthropic / Bedrock reject the
++                    # request with "Thinking may not be enabled when
++                    # tool_choice forces tool use".
++                    is_adaptive_thinking = self._is_adaptive_thinking_model(
++                        model
++                    )
++                    if not is_thinking_enabled and not is_adaptive_thinking:
+                         _tool_choice = {
+                             "name": RESPONSE_FORMAT_TOOL_NAME,
+                             "type": "tool",

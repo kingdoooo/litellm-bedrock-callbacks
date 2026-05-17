@@ -3,7 +3,7 @@ LiteLLM CustomLogger that strips Bedrock-incompatible fields from
 OpenAI Responses API traffic (the Codex CLI path) without affecting
 the Anthropic Messages API path (Claude Code).
 
-Five concerns, two hooks, both guarded to Responses API only.
+Four concerns, two hooks, both guarded to Responses API only.
 
 1) async_pre_call_hook — runs on the raw request body:
 
@@ -15,33 +15,23 @@ Five concerns, two hooks, both guarded to Responses API only.
    - include: ["reasoning.encrypted_content"]: Codex also ships this;
      Bedrock likewise rejects.
 
-   - text.format (entire field): Codex `:review` and similar slash
-     commands attach a top-level structured-output schema. AWS Bedrock
-     has not yet whitelisted `outputConfig.textFormat` for Opus 4.7
-     (only Sonnet/Haiku 4.5 and Opus 4.5/4.6 work) — the native path
-     yields a 400 "output_config.format: Extra inputs are not
-     permitted". The synthetic-tool fallback path then collides with
-     adaptive thinking: Anthropic forbids forced `tool_choice` while
-     thinking is on, and LiteLLM's `is_thinking_enabled` predicate
-     in base_llm/chat/transformation.py only matches `thinking.type
-     == "enabled"`, missing `"adaptive"`, so it sets a forced
-     `toolChoice` and the model returns 400 "Thinking may not be
-     enabled when tool_choice forces tool use."
-     Both paths fail. Stripping `text.format` makes the model produce
-     unstructured text; Codex CLI extracts JSON from the markdown
-     response on its end as its standard fallback. When AWS adds
-     Opus 4.7 to the structured-outputs whitelist OR LiteLLM teaches
-     `is_thinking_enabled` about adaptive, this can be revisited.
-     Parallel bug in another SDK: vercel/ai#14773.
+   - text.format.schema and strict-tool inputSchemas: Bedrock's
+     native structured outputs accept only a subset of JSON Schema
+     Draft 2020-12. Pure validation keywords (minimum, maxLength,
+     pattern, format, multipleOf, …) raise 400 "property X is not
+     supported for type Y". The codex-plugin-cc adversarial-review
+     skill ships a schema with `{"type":"integer","minimum":1}` for
+     line numbers and similar constraints on strings. We recursively
+     strip the unsupported keywords; structural keywords (type,
+     properties, required, enum, items, $ref, $defs, anyOf, …) are
+     preserved so Bedrock still enforces shape at the protocol level.
 
-   - strict-tool inputSchemas: Bedrock's native structured outputs
-     accept only a subset of JSON Schema Draft 2020-12. Pure
-     validation keywords (minimum, maxLength, pattern, format,
-     multipleOf, …) raise 400 "property X is not supported for type
-     Y". We recursively strip the unsupported keywords on tool
-     schemas; structural keywords (type, properties, required, enum,
-     items, $ref, $defs, anyOf, …) are preserved so Bedrock still
-     enforces shape at the protocol level.
+     Note: this path is taken when LiteLLM falls back to the synthetic
+     `json_tool_call` tool (because we override
+     `supports_native_structured_output=false` in config.yaml for
+     Opus 4.7 — Bedrock has not yet whitelisted outputConfig.textFormat
+     for that model). The schema flows into the tool's inputSchema; the
+     same Bedrock schema-keyword constraints apply, hence the strip.
 
 2) async_pre_call_deployment_hook — runs after deployment selection,
    right before the wire serialization. Strips output_config that
@@ -122,12 +112,9 @@ class CodexSanitizer(CustomLogger):
             else:
                 data.pop("include", None)
 
-        # text.format: drop entirely. Both LiteLLM paths (native outputConfig
-        # and synthetic-tool fallback) currently fail on Bedrock for Opus 4.7
-        # — see module docstring. Codex CLI's JSON extraction from prose is
-        # the safe fallback. We still walk text.format.schema below before
-        # popping in case a future code change wants to keep it; the strip
-        # is harmless when the field is about to be removed.
+        # Responses API structured output: data["text"]["format"]["schema"].
+        # Strip Bedrock-unsupported keywords; the schema itself is kept so
+        # LiteLLM's synthetic-tool fallback can pin the model output to it.
         text = data.get("text")
         if isinstance(text, dict):
             fmt = text.get("format")
@@ -135,9 +122,6 @@ class CodexSanitizer(CustomLogger):
                 schema = fmt.get("schema")
                 if isinstance(schema, dict):
                     _strip_unsupported_schema_keys(schema)
-            text.pop("format", None)
-            if not text:
-                data.pop("text", None)
 
         # Strict tools: parameters / input_schema / function.parameters.
         tools = data.get("tools")

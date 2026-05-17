@@ -1,0 +1,33 @@
+Companion to PR #28114: same bug in Bedrock converse_transformation.
+
+When response_format falls back to the synthetic json_tool_call tool
+(because supports_native_structured_output is False), Bedrock's
+converse transformation also force-sets tool_choice if not
+is_thinking_enabled. Same bug as in anthropic/chat/transformation.py:
+is_thinking_enabled doesn't recognise adaptive, so adaptive-thinking
+models still get forced tool_choice and Bedrock returns
+"Thinking may not be enabled when tool_choice forces tool use".
+
+Mirror the fix here. Drop once upstream PR catches up.
+
+--- a/litellm/llms/bedrock/chat/converse_transformation.py
++++ b/litellm/llms/bedrock/chat/converse_transformation.py
+@@ -1014,11 +1014,17 @@
+                 optional_params=optional_params, tools=[_tool]
+             )
+
++            # Adaptive thinking models (Claude 4.7+) need the same carve-out
++            # as anthropic/chat/transformation.py: is_thinking_enabled does
++            # not match thinking.type=="adaptive", so without this check we
++            # set a forced tool_choice while thinking is on the wire body
++            # and Bedrock rejects with "Thinking may not be enabled when
++            # tool_choice forces tool use".
+             if (
+                 litellm.utils.supports_tool_choice(
+                     model=model, custom_llm_provider=self.custom_llm_provider
+                 )
+-                and not is_thinking_enabled
++                and not (is_thinking_enabled or AnthropicConfig._is_adaptive_thinking_model(model))
+             ):
+                 optional_params["tool_choice"] = ToolChoiceValuesBlock(
+                     tool=SpecificToolChoiceBlock(name=RESPONSE_FORMAT_TOOL_NAME)
